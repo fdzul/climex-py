@@ -7,10 +7,10 @@ CERES).
 """
 from __future__ import annotations
 
-import multiprocessing
 import os
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
 from typing import Sequence
 
 import pandas as pd
@@ -74,11 +74,29 @@ def parse_response(js: dict, temporal_resolution: str = "daily") -> pd.DataFrame
     return df
 
 
+def _get_json(url: str, retries: int = 3) -> dict:
+    """GET with retries: NASA POWER answers 429 (too many requests) or 5xx when busy."""
+    for attempt in range(retries + 1):
+        try:
+            r = requests.get(url, timeout=60)
+        except requests.RequestException:
+            if attempt == retries:
+                raise
+        else:
+            if r.status_code != 429 and r.status_code < 500:
+                return r.json()          # errors 4xx come as JSON with a message
+            if attempt == retries:
+                r.raise_for_status()
+        time.sleep(2 ** attempt * 5)     # 5, 10, 20 s
+    raise RuntimeError("unreachable")
+
+
 def _download(job):
-    url, filepath, info, temporal_resolution = job
+    url, filepath, info, temporal_resolution, overwrite = job
+    if not overwrite and os.path.exists(filepath):
+        return info, True, "already downloaded"
     try:
-        r = requests.get(url, timeout=60)
-        df = parse_response(r.json(), temporal_resolution)
+        df = parse_response(_get_json(url), temporal_resolution)
         for k in ("longitude", "latitude", "identifier"):
             df.insert(0, k, info[k])
         df.to_csv(filepath, index=False)
@@ -102,11 +120,15 @@ def download_nasa_power_data(df: pd.DataFrame,
                              end_col: str | None = None,
                              id_col: str | None = None,
                              return_consolidated: bool = True,
+                             overwrite: bool = False,
                              verbose: bool = True) -> pd.DataFrame:
     """Download NASA POWER climate data for the points of a table.
 
-    Each point is saved as a CSV in ``output_folder`` (``<identifier>.csv``),
-    so an interrupted download can be checked point by point.
+    Each point is saved as a CSV in ``output_folder`` (``<identifier>.csv``).
+    Points already in the folder are not downloaded again (unless
+    ``overwrite=True``), so an interrupted download can be run again and
+    continues where it stopped. Busy answers of the API (429, 5xx) are
+    retried three times.
 
     Parameters
     ----------
@@ -126,6 +148,8 @@ def download_nasa_power_data(df: pd.DataFrame,
         Renewable energy, agroclimatology or sustainable buildings (units).
     processes : int
         Simultaneous requests (NASA asks for at most 5); 1 downloads in order.
+        The requests run in threads, so no ``if __name__ == "__main__"``
+        guard is needed in scripts.
     output_folder : str
         Folder for the CSV of each point.
     start_col, end_col : str, optional
@@ -135,6 +159,8 @@ def download_nasa_power_data(df: pd.DataFrame,
     return_consolidated : bool
         If True, return the data of all the points in one table; if False,
         the result of each download.
+    overwrite : bool
+        Download again the points whose CSV is already in ``output_folder``.
     verbose : bool
         Show the progress.
 
@@ -160,6 +186,8 @@ def download_nasa_power_data(df: pd.DataFrame,
     processes = max(1, min(int(processes), 5))
     os.makedirs(output_folder, exist_ok=True)
 
+    if id_col and df[id_col].duplicated().any():
+        raise ValueError(f"'{id_col}' has repeated values; each point needs its own identifier")
     jobs = []
     for idx, row in df.iterrows():
         start = pd.to_datetime(row[start_col]).strftime("%Y%m%d") if start_col else start_date
@@ -171,34 +199,27 @@ def download_nasa_power_data(df: pd.DataFrame,
                 "end_date": None if temporal_resolution == "climatology" else end}
         url = build_url(row[lat_col], row[lon_col], parameters, temporal_resolution,
                         community, start, end)
-        jobs.append((url, os.path.join(output_folder, info["filename"]), info, temporal_resolution))
+        jobs.append((url, os.path.join(output_folder, info["filename"]), info,
+                     temporal_resolution, overwrite))
 
     if verbose:
         print(f"{len(jobs)} points; parameters: {', '.join(parameters)}; "
               f"{temporal_resolution}; community {community}; {processes} processes")
     t0 = time.time()
     out = []
-    if processes == 1:
-        it = map(_download, jobs)
-        pool = None
-    else:
-        pool = multiprocessing.Pool(processes)
-        it = pool.imap_unordered(_download, jobs)
-    try:
-        for i, (info, ok, err) in enumerate(it, 1):
+    with ThreadPoolExecutor(max_workers=processes) as ex:
+        for i, (info, ok, err) in enumerate(ex.map(_download, jobs), 1):
             if verbose:
                 sys.stderr.write(f"\rDownloading: {i / len(jobs):.0%}")
             out.append({**info, "success": ok, "error": err,
                         "downloaded_at": time.strftime("%Y-%m-%d %H:%M:%S")})
-    finally:
-        if pool is not None:
-            pool.close()
-            pool.join()
     res = pd.DataFrame(out)
     if verbose:
         sys.stderr.write("\n")
         print(f"{int(res['success'].sum())}/{len(res)} points downloaded "
               f"in {time.time() - t0:.1f} s")
+        for _, r in res[~res["success"]].iterrows():
+            print(f"  failed {r['identifier']}: {r['error']}")
     if return_consolidated and res["success"].any():
         return _consolidate(res, output_folder)
     return res

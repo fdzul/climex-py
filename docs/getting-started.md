@@ -12,17 +12,18 @@ import rgeomex
 import climex
 
 mun = rgeomex.load("AGEM_inegi19_mx", cve_edo="31")          # Yucatán
-pts = mun.to_crs(6372).representative_point().to_crs(4326)
-mun["longitude"], mun["latitude"] = pts.x, pts.y
+pts = climex.centroids(mun, id_col="CVEGEO")                  # a point inside each one
 
 clima = climex.download_nasa_power_data(
-    mun[["CVEGEO", "latitude", "longitude"]], id_col="CVEGEO",
+    pts, id_col="CVEGEO",
     parameters=["T2M", "T2M_MAX", "T2M_MIN", "PRECTOTCORR", "RH2M"],
     start_date="20240101", end_date="20241231", community="AG")
 ```
 
 Each point is saved as `<identifier>.csv` in `output_folder`
 (`./nasa_power_data` by default), and the result joins all of them.
+`centroids()` uses the representative point of each polygon, which is always
+inside it (the centroid of a curved municipality can fall outside).
 
 ## Temporal resolution
 
@@ -51,6 +52,11 @@ parameters; `"AG"` (agroclimatology) gives precipitation in mm/day.
 ## Requests
 
 NASA asks for at most 5 simultaneous requests, so `processes` is limited to
-5; with `processes=1` the points are downloaded one after the other. Points
-that fail are reported, and with `return_consolidated=False` the function
-returns the result of each download (`success`, `error`).
+5; with `processes=1` the points are downloaded one after the other. Busy
+answers of the API are retried three times.
+
+If the download stops (connection, many points), run the same call again:
+the points whose CSV is already in `output_folder` are skipped
+(`overwrite=True` downloads them again). The failed points are listed at the
+end, and with `return_consolidated=False` the function returns the result
+of each download (`success`, `error`).
