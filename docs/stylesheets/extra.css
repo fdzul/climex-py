@@ -1,0 +1,291 @@
+/******************************************************************************
+climex
+Material for MkDocs Theme
+Author: Felipe Dzul
+Palette source: official package logo (navy / orange / blue / sun)
+******************************************************************************/
+
+/******************************************************************************
+PALETTE
+******************************************************************************/
+
+:root{
+
+  /* Primary — logo navy (hexagon, banner) */
+
+  --md-primary-fg-color:            #012053;
+  --md-primary-fg-color--light:     #1E6EC8;
+  --md-primary-fg-color--dark:      #00153A;
+
+  /* Accent — logo orange ("ex", mercury, temperature line) */
+
+  --md-accent-fg-color:             #F08028;
+  --md-accent-fg-color--transparent: #F0802826;
+
+  /* Secondary logo colors — sun, rain and climate raster, used below for
+     admonitions (not native MkDocs variables, defined here for our own
+     custom rules) */
+
+  --cx-sun:#F7AA1E;   /* sun (temperature) */
+  --cx-rain:#1E6EC8;   /* rain (precipitation) */
+  --cx-raster:#FAE496;   /* raster yellow */
+
+  /* Background */
+
+  --md-default-bg-color:            #FFFFFF;
+  --md-default-bg-color--light:     #F7F9FC;
+
+  /* Text */
+
+  --md-default-fg-color:            #1B1F24;
+  --md-default-fg-color--light:     #5F6C7B;
+
+  /* Links */
+
+  --md-typeset-a-color:             #1E6EC8;
+
+}
+
+/******************************************************************************
+Dark Mode
+******************************************************************************/
+
+[data-md-color-scheme="slate"]{
+
+  --md-primary-fg-color:#1E6EC8;
+
+  --md-accent-fg-color:#F08028;
+  --md-accent-fg-color--transparent: #F0802833;
+
+  --cx-sun:#F7BE4A;
+  --cx-rain:#5A9BE0;
+
+  --md-default-bg-color:#111827;
+
+  --md-default-fg-color:#F9FAFB;
+
+}
+
+/******************************************************************************
+HEADER
+******************************************************************************/
+
+.md-header{
+
+    background:#012053;
+
+    box-shadow:none;
+
+}
+
+/******************************************************************************
+TABS
+******************************************************************************/
+
+.md-tabs{
+
+    background:#012053;
+
+}
+
+/******************************************************************************
+SIDEBAR
+******************************************************************************/
+
+.md-sidebar{
+
+    border-right:1px solid #E5EAF2;
+
+}
+
+/******************************************************************************
+LINKS
+******************************************************************************/
+
+.md-typeset a{
+
+    color:#1E6EC8;
+
+    font-weight:500;
+
+}
+
+.md-typeset a:hover{
+
+    color:#F08028;
+
+}
+
+/******************************************************************************
+BUTTONS
+******************************************************************************/
+
+.md-button{
+
+    border-radius:10px;
+
+    border-width:2px;
+
+}
+
+.md-button--primary{
+
+    background:#012053;
+
+    color:white;
+
+}
+
+.md-button--primary:hover{
+
+    background:#1E6EC8;
+
+}
+
+/******************************************************************************
+TABLES
+******************************************************************************/
+
+.md-typeset table:not([class]){
+
+    border-radius:10px;
+
+    overflow:hidden;
+
+}
+
+.md-typeset table:not([class]) th{
+
+    background:#012053;
+
+    color:white;
+
+}
+
+.md-typeset table:not([class]) tr:nth-child(even){
+
+    background:#F7F9FC;
+
+}
+
+/******************************************************************************
+CODE
+******************************************************************************/
+
+code{
+
+    border-radius:6px;
+
+    background:#EEF3F8;
+
+    color:#012053;
+
+}
+
+pre{
+
+    border-radius:10px;
+
+}
+
+/******************************************************************************
+SEARCH
+******************************************************************************/
+
+.md-search__input{
+
+    border-radius:10px;
+
+}
+
+/******************************************************************************
+ADMONITIONS — mapped to the logo colors (sun, rain, temperature)
+******************************************************************************/
+
+.md-typeset .admonition.note{
+
+    border-left:5px solid var(--cx-rain);
+
+}
+
+.md-typeset .admonition.tip{
+
+    border-left:5px solid var(--cx-sun);
+
+}
+
+.md-typeset .admonition.warning{
+
+    border-left:5px solid var(--md-accent-fg-color);
+
+}
+
+.md-typeset .admonition.danger{
+
+    border-left:5px solid #D7551E;
+
+}
+
+/******************************************************************************
+FOOTER
+******************************************************************************/
+
+.md-footer{
+
+    background:#012053;
+
+}
+
+.md-footer-meta{
+
+    background:#00153A;
+
+}
+
+/******************************************************************************
+HERO IMAGE
+******************************************************************************/
+
+.hero{
+
+    border-radius:18px;
+
+    background:white;
+
+    padding:2rem;
+
+    box-shadow:0 10px 35px rgba(1,32,83,.08);
+
+}
+
+/******************************************************************************
+CARDS
+******************************************************************************/
+
+.md-typeset .grid.cards>ul>li{
+
+    border-radius:16px;
+
+    border:1px solid #E5EAF2;
+
+    transition:.25s;
+
+}
+
+.md-typeset .grid.cards>ul>li:hover{
+
+    transform:translateY(-4px);
+
+    box-shadow:0 8px 30px rgba(1,32,83,.12);
+
+}
+
+/******************************************************************************
+ICONS
+******************************************************************************/
+
+.md-typeset svg{
+
+    color:#012053;
+
+}

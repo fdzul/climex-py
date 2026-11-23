@@ -1,4 +1,4 @@
-# Reference
+# Functions
 
 ::: climex.download_nasa_power_data
 

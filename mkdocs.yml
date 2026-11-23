@@ -1,44 +1,79 @@
 site_name: climex
-site_description: "Climate data of Mexico from the NASA POWER API (daily, monthly or climatological temperature, precipitation, humidity, wind and radiation for a set of points)."
+site_description: "Climate data of Mexico from the NASA POWER API (daily, monthly or climatological temperature, precipitation, humidity, wind and radiation for the 2,465 municipalities or any set of points)."
+site_author: Felipe Antonio Dzul Manzanilla
 site_url: https://fdzul.github.io/climex-py/
-repo_url: https://github.com/fdzul/climex-py
+
 repo_name: fdzul/climex-py
-copyright: Felipe Antonio Dzul Manzanilla · MIT license
+repo_url: https://github.com/fdzul/climex-py
+
+copyright: Copyright © 2026 Felipe A. Dzul Manzanilla
 
 theme:
   name: material
   custom_dir: overrides
+  language: en
+
   logo: assets/logo.png
   favicon: assets/favicon.png
-  language: en
+
   palette:
+
+    #######################################################################
+    ## LIGHT
+    #######################################################################
+
     - scheme: default
-      primary: teal
+
+      primary: custom
+      accent: custom
+
       toggle:
         icon: material/weather-night
         name: Dark mode
+
+    #######################################################################
+    ## DARK
+    #######################################################################
+
     - scheme: slate
-      primary: teal
+
+      primary: custom
+      accent: custom
+
       toggle:
         icon: material/weather-sunny
         name: Light mode
-  features:
-    - navigation.tabs
-    - navigation.tabs.sticky
-    - navigation.sections
-    - navigation.indexes
-    - navigation.top
-    - content.code.copy
 
-nav:
-  - Home: index.md
-  - Getting Started: getting-started.md
-  - Reference: reference.md
-  - About:
-      - Citation: citation.md
-      - Changelog: changelog.md
-      - License: license.md
-  - Español: es.md
+  font:
+    text: Inter
+    code: JetBrains Mono
+
+  features:
+
+    # Navigation
+    - navigation.instant
+    - navigation.instant.progress
+    - navigation.tabs
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - navigation.footer
+    - navigation.indexes
+
+    # Search
+    - search.highlight
+    - search.share
+    - search.suggest
+
+    # TOC
+    - toc.follow
+
+    # Code
+    - content.code.copy
+    - content.code.annotate
+
+    # Tabs
+    - content.tabs.link
 
 plugins:
   - search
@@ -52,7 +87,67 @@ plugins:
             heading_level: 3
 
 markdown_extensions:
+
   - admonition
+  - attr_list
+  - footnotes
   - tables
-  - pymdownx.highlight
+
+  - pymdownx.details
   - pymdownx.superfences
+
+  - pymdownx.highlight:
+      anchor_linenums: true
+
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+
+  - pymdownx.tabbed:
+      alternate_style: true
+
+  - pymdownx.magiclink
+
+  - toc:
+      permalink: true
+
+extra_css:
+  - stylesheets/extra.css
+
+extra:
+
+  generator: false
+
+  social:
+
+    - icon: fontawesome/brands/github
+      link: https://github.com/fdzul
+
+    - icon: fontawesome/brands/r-project
+      link: https://github.com/fdzul/climex
+
+    - icon: material/book-open-page-variant
+      link: citation/
+
+nav:
+  - Home: index.md
+  - Examples: examples.md
+
+  - Getting Started:
+      - Quick Start: quickstart.md
+
+  - Data:
+      - Municipalities and parameters: data.md
+
+  - API Reference:
+      - Functions: reference.md
+
+  - Citation:
+      - How to Cite: citation.md
+
+  - Changelog:
+      - Releases: changelog.md
+
+  - License:
+      - MIT License: license.md
+
+  - Español: es.md
