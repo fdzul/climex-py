@@ -87,3 +87,17 @@ def test_centroids():
     c = climex.centroids(g, "CVEGEO")
     assert list(c.columns) == ["CVEGEO", "latitude", "longitude"]
     assert 20 < c.latitude[0] < 21 and -90 < c.longitude[0] < -89
+
+
+def test_municipalities():
+    mx = climex.municipalities()
+    assert len(mx) == 2465 and mx["CVEGEO"].is_unique
+    yuc = climex.municipalities(31)
+    assert len(yuc) == 106 and set(yuc["CVE_ENT"]) == {"31"}
+    two = climex.municipalities(["14", "31"])
+    assert set(two["CVE_ENT"]) == {"14", "31"}
+    c = climex.municipalities("31", point="centroid")
+    assert (c["latitude"] == c["centroid_lat"]).all()
+    assert mx["latitude"].between(14, 33).all() and mx["longitude"].between(-119, -86).all()
+    with pytest.raises(ValueError):
+        climex.municipalities("33")

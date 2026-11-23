@@ -33,6 +33,14 @@ clima = climex.download_nasa_power_data(
     temporal_resolution="daily", community="AG")
 ```
 
+For the municipalities of Mexico the points come with the package:
+
+```python
+yuc = climex.municipalities("31")     # Yucatán; climex.municipalities() for all the country
+clima = climex.download_nasa_power_data(yuc, id_col="CVEGEO", parameters=["T2M", "PRECTOTCORR"],
+                                        start_date="20240101", end_date="20241231")
+```
+
 The result has one row per point and day (`identifier`, `latitude`,
 `longitude`, `date` and one column per parameter). With
 `temporal_resolution="monthly"` the rows are per year and month, and with
@@ -60,7 +68,8 @@ pip install git+https://github.com/fdzul/climex-py
 
 ```python
 import climex
-clima = climex.download_nasa_power_data(pts, id_col="id",
+yuc = climex.municipalities("31")     # municipios de Yucatán; sin argumento, todo el país
+clima = climex.download_nasa_power_data(yuc, id_col="CVEGEO",
                                         parameters=["T2M", "PRECTOTCORR"],
                                         start_date="20240101", end_date="20241231")
 ```

@@ -23,6 +23,21 @@ clima = climex.download_nasa_power_data(pts, id_col="id",
                                         start_date="20240101", end_date="20241231")
 ```
 
+El paquete trae un punto por cada uno de los 2,465 municipios de México
+(INEGI 2019), para descargar el clima de un estado o de todo el país:
+
+```python
+yuc = climex.municipalities("31")              # los 106 municipios de Yucatán
+mx = climex.municipalities()                   # los 2,465 del país
+clima = climex.download_nasa_power_data(yuc, id_col="CVEGEO",
+                                        parameters=["T2M", "PRECTOTCORR"],
+                                        start_date="20240101", end_date="20241231")
+```
+
+Por omisión el punto siempre cae dentro del municipio (punto representativo);
+con `point="centroid"` se usa el centroide geométrico, que cae fuera en 67
+municipios.
+
 | `temporal_resolution` | Filas |
 |---|---|
 | `"daily"` | una por día (`date`) |

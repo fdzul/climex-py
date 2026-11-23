@@ -1,29 +1,48 @@
 # Getting Started
 
-## Points
+## Municipalities
 
-`download_nasa_power_data()` takes a table with one row per point and the
-columns `latitude` and `longitude` (decimal degrees, WGS84). With
-[rgeomex](https://fdzul.github.io/rgeomex-py/) the points can be the
-centroids of the municipalities of a state:
+The package brings one point for each of the 2,465 municipalities of Mexico
+(INEGI 2019), so the climate of a state or of all the country needs no other
+data:
 
 ```python
-import rgeomex
 import climex
 
-mun = rgeomex.load("AGEM_inegi19_mx", cve_edo="31")          # Yucatán
-pts = climex.centroids(mun, id_col="CVEGEO")                  # a point inside each one
+yuc = climex.municipalities("31")              # the 106 municipalities of Yucatán
+mx = climex.municipalities()                   # the 2,465 of the country
+jal_yuc = climex.municipalities(["14", "31"])  # several states
 
 clima = climex.download_nasa_power_data(
-    pts, id_col="CVEGEO",
+    yuc, id_col="CVEGEO",
     parameters=["T2M", "T2M_MAX", "T2M_MIN", "PRECTOTCORR", "RH2M"],
     start_date="20240101", end_date="20241231", community="AG")
 ```
 
+The table has the keys (`CVEGEO`, `CVE_ENT`, `CVE_MUN`), the names of the
+state and the municipality, the point (`latitude`, `longitude`) and the area.
+By default the point is always inside the municipality (its representative
+point); `point="centroid"` uses the geometric centroid, which falls outside
+67 curved or fragmented municipalities (column `centroid_inside`).
+
 Each point is saved as `<identifier>.csv` in `output_folder`
 (`./nasa_power_data` by default), and the result joins all of them.
-`centroids()` uses the representative point of each polygon, which is always
-inside it (the centroid of a curved municipality can fall outside).
+
+## Other points
+
+`download_nasa_power_data()` takes any table with one row per point and the
+columns `latitude` and `longitude` (decimal degrees, WGS84). For polygons,
+e.g. the AGEB or localities of [rgeomex](https://fdzul.github.io/rgeomex-py/),
+`centroids()` gives a point inside each one:
+
+```python
+import rgeomex
+
+ageb = rgeomex.extract_ageb(locality="Merida", cve_edo="31")["ageb"]
+pts = climex.centroids(ageb, id_col="CVEGEO")
+clima = climex.download_nasa_power_data(pts, id_col="CVEGEO", parameters=["T2M"],
+                                        start_date="20240101", end_date="20241231")
+```
 
 ## Temporal resolution
 

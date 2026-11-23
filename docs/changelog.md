@@ -16,6 +16,9 @@
   interrupted download continues where it stopped (`overwrite=True` to
   download again); repeated identifiers raise an error; the failed points
   are listed at the end.
+- New `municipalities()`: one point for each of the 2,465 municipalities of
+  Mexico (INEGI 2019), bundled with the package, for all the country or by
+  state; built with `data-raw/municipalities.py`.
 - New `centroids()`: a point inside each polygon (e.g. municipalities of
   rgeomex) ready for `download_nasa_power_data()`.
 - The `spatial_resolution` argument was removed (only `"point"` was valid

@@ -2,6 +2,8 @@
 
 ::: climex.download_nasa_power_data
 
+::: climex.municipalities
+
 ::: climex.centroids
 
 ::: climex.build_url
