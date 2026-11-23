@@ -2,17 +2,23 @@ import pandas as pd
 
 
 def load_centroid_data(path: str, state: str) -> pd.DataFrame:
-    """Read a CSV of centroids and keep the rows of one state.
+    """Read a CSV of municipal points and keep the municipalities of one state.
 
     Parameters
     ----------
     path : str
-        CSV with a ``CVEGEO`` column.
+        CSV with a ``CVEGEO`` column (municipality key, 5 digits).
     state : str
-        Last three characters of ``CVEGEO`` that identify the rows to keep.
+        State code, e.g. ``"01"`` (the first two digits of ``CVEGEO``).
+
+    Notes
+    -----
+    :func:`climex.municipalities` gives the same points for all the
+    municipalities of Mexico without a CSV.
     """
     df = pd.read_csv(path, dtype={"CVEGEO": str})
-    return df[df["CVEGEO"].str[-3:] == state].reset_index(drop=True)
+    cve = df["CVEGEO"].str.zfill(5)
+    return df[cve.str[:2] == str(state).zfill(2)].reset_index(drop=True)
 
 
 def centroids(gdf, id_col: str) -> pd.DataFrame:

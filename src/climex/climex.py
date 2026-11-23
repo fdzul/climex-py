@@ -91,9 +91,47 @@ def _get_json(url: str, retries: int = 3) -> dict:
     raise RuntimeError("unreachable")
 
 
+def _keys(temporal_resolution: str) -> list[str]:
+    return {"daily": ["date"], "monthly": ["year", "month"]}.get(temporal_resolution, ["period"])
+
+
+def _in_period(d: pd.DataFrame, start, end, temporal_resolution: str) -> pd.DataFrame:
+    """Rows of the period requested (a CSV can have a longer period)."""
+    if temporal_resolution == "daily":
+        dates = pd.to_datetime(d["date"])
+        return d[(dates >= pd.to_datetime(str(start))) & (dates <= pd.to_datetime(str(end)))]
+    if temporal_resolution == "monthly":
+        return d[(d["year"] >= int(str(start)[:4])) & (d["year"] <= int(str(end)[:4]))]
+    return d
+
+
+def _covers(filepath: str, info: dict, temporal_resolution: str, parameters) -> bool:
+    """True if the CSV of a point already has all the period requested, with
+    data in every row (days not yet published come as NaN and are asked again)."""
+    if not os.path.exists(filepath):
+        return False
+    try:
+        d = pd.read_csv(filepath)
+        if not set(parameters) <= set(d.columns):
+            return False
+        if temporal_resolution == "daily":
+            dates = pd.to_datetime(d["date"])
+            if dates.min() > pd.to_datetime(str(info["start_date"])) or \
+               dates.max() < pd.to_datetime(str(info["end_date"])):
+                return False
+        elif temporal_resolution == "monthly":
+            if d["year"].min() > int(str(info["start_date"])[:4]) or \
+               d["year"].max() < int(str(info["end_date"])[:4]):
+                return False
+        d = _in_period(d, info["start_date"], info["end_date"], temporal_resolution)
+        return not d[list(parameters)].isna().all(axis=1).any()
+    except Exception:                            # noqa: BLE001 - unreadable: download again
+        return False
+
+
 def _download(job):
-    url, filepath, info, temporal_resolution, overwrite = job
-    if not overwrite and os.path.exists(filepath):
+    url, filepath, info, temporal_resolution, overwrite, parameters = job
+    if not overwrite and _covers(filepath, info, temporal_resolution, parameters):
         return info, True, "already downloaded"
     try:
         df = parse_response(_get_json(url), temporal_resolution)
@@ -113,6 +151,7 @@ def download_nasa_power_data(df: pd.DataFrame,
                              parameters: Sequence[str] = ("T2M", "T2MDEW", "T2MWET", "TS",
                                                           "T2M_RANGE", "T2M_MAX", "T2M_MIN"),
                              temporal_resolution: str = "daily",
+                             spatial_resolution: str = "point",
                              community: str = "RE",
                              processes: int = 5,
                              output_folder: str = "./nasa_power_data",
@@ -125,9 +164,10 @@ def download_nasa_power_data(df: pd.DataFrame,
     """Download NASA POWER climate data for the points of a table.
 
     Each point is saved as a CSV in ``output_folder`` (``<identifier>.csv``).
-    Points already in the folder are not downloaded again (unless
-    ``overwrite=True``), so an interrupted download can be run again and
-    continues where it stopped. Busy answers of the API (429, 5xx) are
+    A point whose CSV already has all the period requested is not downloaded
+    again (unless ``overwrite=True``), so an interrupted download can be run
+    again and continues where it stopped; if the period grows (e.g. an
+    update with a later ``end_date``), the point is downloaded again. Busy answers of the API (429, 5xx) are
     retried three times.
 
     Parameters
@@ -144,6 +184,9 @@ def download_nasa_power_data(df: pd.DataFrame,
         ``PRECTOTCORR``; humidity: ``RH2M``, ``QV2M``; wind: ``WS2M``,
         ``WS10M``; radiation: ``ALLSKY_SFC_SW_DWN``; pressure: ``PS``.
     temporal_resolution : {"daily", "monthly", "climatology"}
+    spatial_resolution : {"point"}
+        Kept for compatibility with version 0.1; only ``"point"`` is valid
+        (one request per latitude and longitude).
     community : {"RE", "AG", "SB"}
         Renewable energy, agroclimatology or sustainable buildings (units).
     processes : int
@@ -160,7 +203,7 @@ def download_nasa_power_data(df: pd.DataFrame,
         If True, return the data of all the points in one table; if False,
         the result of each download.
     overwrite : bool
-        Download again the points whose CSV is already in ``output_folder``.
+        Download again every point, even if its CSV already has the period.
     verbose : bool
         Show the progress.
 
@@ -181,6 +224,8 @@ def download_nasa_power_data(df: pd.DataFrame,
     """
     if lat_col not in df.columns or lon_col not in df.columns:
         raise ValueError(f"df must have the columns '{lat_col}' and '{lon_col}'")
+    if spatial_resolution != "point":
+        raise ValueError('spatial_resolution must be "point" (one request per latitude and longitude)')
     parameters = list(parameters)
     build_url(0, 0, parameters, temporal_resolution, community, start_date, end_date)  # validate
     processes = max(1, min(int(processes), 5))
@@ -200,7 +245,7 @@ def download_nasa_power_data(df: pd.DataFrame,
         url = build_url(row[lat_col], row[lon_col], parameters, temporal_resolution,
                         community, start, end)
         jobs.append((url, os.path.join(output_folder, info["filename"]), info,
-                     temporal_resolution, overwrite))
+                     temporal_resolution, overwrite, parameters))
 
     if verbose:
         print(f"{len(jobs)} points; parameters: {', '.join(parameters)}; "
@@ -213,6 +258,17 @@ def download_nasa_power_data(df: pd.DataFrame,
                 sys.stderr.write(f"\rDownloading: {i / len(jobs):.0%}")
             out.append({**info, "success": ok, "error": err,
                         "downloaded_at": time.strftime("%Y-%m-%d %H:%M:%S")})
+    # second chance for the points that failed (network, API busy)
+    failed = [j for j, r in zip(jobs, out) if not r["success"]]
+    if failed:
+        if verbose:
+            print(f"\nretrying {len(failed)} failed points...")
+        time.sleep(10)
+        again = {r[0]["identifier"]: r for r in map(_download, failed)}
+        for r in out:
+            if r["identifier"] in again:
+                info, ok, err = again[r["identifier"]]
+                r.update(success=ok, error=err)
     res = pd.DataFrame(out)
     if verbose:
         sys.stderr.write("\n")
@@ -221,15 +277,52 @@ def download_nasa_power_data(df: pd.DataFrame,
         for _, r in res[~res["success"]].iterrows():
             print(f"  failed {r['identifier']}: {r['error']}")
     if return_consolidated and res["success"].any():
-        return _consolidate(res, output_folder)
+        data = _consolidate(res, output_folder, temporal_resolution, parameters)
+        if verbose:
+            _report(data, res, temporal_resolution, parameters)
+        return data
     return res
 
 
-def _consolidate(res: pd.DataFrame, output_folder: str) -> pd.DataFrame:
+def _consolidate(res: pd.DataFrame, output_folder: str, temporal_resolution: str = "daily",
+                 parameters=None) -> pd.DataFrame:
+    """Join the CSV of the points: only the period requested, one row per
+    point and date (no duplicates), sorted by point and date."""
     parts = []
     for _, r in res[res["success"]].iterrows():
-        d = pd.read_csv(os.path.join(output_folder, r["filename"]))
+        d = pd.read_csv(os.path.join(output_folder, r["filename"]), dtype={"identifier": str})
         if "date" in d.columns:
             d["date"] = pd.to_datetime(d["date"])
-        parts.append(d)
-    return pd.concat(parts, ignore_index=True) if parts else pd.DataFrame()
+        parts.append(_in_period(d, r["start_date"], r["end_date"], temporal_resolution))
+    if not parts:
+        return pd.DataFrame()
+    keys = ["identifier"] + _keys(temporal_resolution)
+    data = pd.concat(parts, ignore_index=True)
+    data = data.drop_duplicates(subset=keys, keep="last").sort_values(keys, kind="stable")
+    return data.reset_index(drop=True)
+
+
+def _report(data: pd.DataFrame, res: pd.DataFrame, temporal_resolution: str, parameters) -> None:
+    """Print whether every point has all the period."""
+    ok = res[res["success"]]
+    if temporal_resolution == "daily":
+        expected = (pd.to_datetime(ok["end_date"].astype(str)) -
+                    pd.to_datetime(ok["start_date"].astype(str))).dt.days + 1
+    elif temporal_resolution == "monthly":
+        expected = (ok["end_date"].astype(str).str[:4].astype(int) -
+                    ok["start_date"].astype(str).str[:4].astype(int) + 1) * 12
+    else:
+        expected = None
+    rows = data.groupby("identifier").size()
+    empty = data[list(parameters)].isna().all(axis=1)
+    print(f"{len(data):,} rows; {data['identifier'].nunique()} points; no duplicates")
+    if expected is not None:
+        exp = pd.Series(expected.to_numpy(), index=ok["identifier"].astype(str))
+        short = (rows.reindex(exp.index, fill_value=0) < exp)
+        print(f"complete: {int((~short).sum())}/{len(exp)} points with all the period")
+    if empty.any():
+        last = data.loc[empty, _keys(temporal_resolution)].iloc[:, 0]
+        if temporal_resolution == "daily":
+            last = last.dt.strftime("%Y-%m-%d")
+        print(f"{int(empty.sum())} rows without data (NaN), from {last.min()} to {last.max()}"
+              " - days not yet published by NASA POWER, they are asked again in the next run")

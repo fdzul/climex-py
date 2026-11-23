@@ -72,10 +72,19 @@ parameters; `"AG"` (agroclimatology) gives precipitation in mm/day.
 
 NASA asks for at most 5 simultaneous requests, so `processes` is limited to
 5; with `processes=1` the points are downloaded one after the other. Busy
-answers of the API are retried three times.
+answers of the API are retried three times, and the points that still fail
+get a second round at the end.
+
+The result has only the period requested, with one row per point and date
+(no duplicates), sorted by point and date. At the end the function reports
+whether every point has all the period and how many rows have no data
+(NaN): usually the last days, not yet published by NASA POWER.
 
 If the download stops (connection, many points), run the same call again:
-the points whose CSV is already in `output_folder` are skipped
-(`overwrite=True` downloads them again). The failed points are listed at the
+the points whose CSV in `output_folder` already has the period, with data in
+every day, are skipped; the rest are downloaded again (the CSV is replaced,
+never appended, so nothing is duplicated).
+For an update (the same folder with a later `end_date`) the points are
+downloaded again; `overwrite=True` downloads everything again. The failed points are listed at the
 end, and with `return_consolidated=False` the function returns the result
 of each download (`success`, `error`).

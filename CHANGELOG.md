@@ -11,18 +11,26 @@
 - Downloads run in threads instead of processes: no `if __name__ == "__main__"`
   guard is needed in scripts (on macOS and Windows the processes failed
   without it).
-- Busy answers of NASA POWER (429, 5xx) are retried three times.
-- Points already in `output_folder` are not downloaded again, so an
-  interrupted download continues where it stopped (`overwrite=True` to
-  download again); repeated identifiers raise an error; the failed points
+- Busy answers of NASA POWER (429, 5xx) are retried three times, and the
+  points that still fail get a second round at the end.
+- The result has only the period requested, one row per point and date (no
+  duplicates), sorted by point and date; at the end it reports whether every
+  point has all the period and the days without data.
+- A point whose CSV in `output_folder` already has the period requested is
+  not downloaded again (days not yet published, NaN, are asked again), so an
+  interrupted download continues where it stopped; with a later `end_date` (an update) it is downloaded again
+  (`overwrite=True` downloads everything again); repeated identifiers raise an error; the failed points
   are listed at the end.
 - New `municipalities()`: one point for each of the 2,465 municipalities of
   Mexico (INEGI 2019), bundled with the package, for all the country or by
   state; built with `data-raw/municipalities.py`.
 - New `centroids()`: a point inside each polygon (e.g. municipalities of
   rgeomex) ready for `download_nasa_power_data()`.
-- The `spatial_resolution` argument was removed (only `"point"` was valid
-  with latitude and longitude).
+- `spatial_resolution` accepts only `"point"` (the regional API needs a
+  bounding box, not a latitude and longitude); kept so the code of 0.1 runs.
+- The identifiers keep their leading zeros in the result (`01001`, not `1001`).
+- `load_centroid_data()` keeps the municipalities of the state given by the
+  first two digits of `CVEGEO` (before it compared the last three).
 - New `build_url()` and `parse_response()`; tests; documentation with mkdocs.
 
 ## 0.1.0 (2025-08-15)

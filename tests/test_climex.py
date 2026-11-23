@@ -8,6 +8,9 @@ from climex import climex as cx
 DAILY = {"properties": {"parameter": {
     "T2M": {"20240101": 22.5, "20240102": -999.0},
     "PRECTOTCORR": {"20240101": 0.0, "20240102": 3.1}}}}
+FULL = {"properties": {"parameter": {
+    "T2M": {"20240101": 22.5, "20240102": 23.0, "20240103": 23.4},
+    "PRECTOTCORR": {"20240101": 0.0, "20240102": 3.1, "20240103": 0.2}}}}
 MONTHLY = {"properties": {"parameter": {
     "T2M": {"202401": 22.0, "202402": 23.0, "202413": 26.0}}}}
 
@@ -47,12 +50,18 @@ class _Resp:
 
 def test_download(tmp_path, monkeypatch):
     calls = []
-    monkeypatch.setattr(cx.requests, "get", lambda url, timeout: calls.append(url) or _Resp(DAILY))
+    monkeypatch.setattr(cx.requests, "get", lambda url, timeout: calls.append(url) or _Resp(FULL))
     pts = pd.DataFrame({"id": ["a", "b"], "latitude": [20.9, 19.4], "longitude": [-89.6, -99.1]})
     out = climex.download_nasa_power_data(pts, id_col="id", parameters=["T2M", "PRECTOTCORR"],
                                           start_date="20240101", end_date="20240102",
                                           processes=1, output_folder=str(tmp_path), verbose=False)
-    assert len(out) == 4 and set(out["identifier"]) == {"a", "b"}
+    assert len(out) == 4 and set(out["identifier"]) == {"a", "b"}   # only the 2 days asked
+    # keys with leading zeros keep them (01001, not 1001)
+    z = climex.download_nasa_power_data(pts.assign(id=["01001", "01002"]), id_col="id",
+                                        parameters=["T2M"], processes=1, start_date="20240101",
+                                        end_date="20240102", output_folder=str(tmp_path / "z"),
+                                        spatial_resolution="point", verbose=False)
+    assert set(z["identifier"]) == {"01001", "01002"}
     assert (tmp_path / "a.csv").exists()
     # run again: the points already downloaded are not requested again
     n = len(calls)
@@ -60,6 +69,11 @@ def test_download(tmp_path, monkeypatch):
                                     start_date="20240101", end_date="20240102",
                                     output_folder=str(tmp_path), verbose=False)
     assert len(calls) == n
+    # a later end date (an update) downloads the points again
+    climex.download_nasa_power_data(pts, id_col="id", parameters=["T2M"], processes=1,
+                                    start_date="20240101", end_date="20240104",
+                                    output_folder=str(tmp_path), verbose=False)
+    assert len(calls) == n + 2
     with pytest.raises(ValueError, match="repeated"):
         climex.download_nasa_power_data(pd.concat([pts, pts]), id_col="id", verbose=False)
     with pytest.raises(ValueError):
@@ -68,8 +82,9 @@ def test_download(tmp_path, monkeypatch):
 
 def test_load_centroid_data(tmp_path):
     f = tmp_path / "c.csv"
-    pd.DataFrame({"CVEGEO": ["31050", "14039"], "x": [1, 2]}).to_csv(f, index=False)
-    assert len(climex.load_centroid_data(str(f), "050")) == 1
+    pd.DataFrame({"CVEGEO": ["31050", "14039", "01001"], "x": [1, 2, 3]}).to_csv(f, index=False)
+    assert list(climex.load_centroid_data(str(f), "31")["CVEGEO"]) == ["31050"]
+    assert list(climex.load_centroid_data(str(f), 1)["CVEGEO"]) == ["01001"]
 
 
 def test_retry(monkeypatch):
@@ -101,3 +116,27 @@ def test_municipalities():
     assert mx["latitude"].between(14, 33).all() and mx["longitude"].between(-119, -86).all()
     with pytest.raises(ValueError):
         climex.municipalities("33")
+
+
+def test_no_duplicates_and_period(tmp_path, monkeypatch):
+    long = {"properties": {"parameter": {"T2M": {f"202401{d:02d}": 20.0 + d for d in range(1, 11)}}}}
+    monkeypatch.setattr(cx.requests, "get", lambda url, timeout: _Resp(long))
+    pts = pd.DataFrame({"id": ["01001"], "latitude": [21.8], "longitude": [-102.3]})
+    kw = dict(id_col="id", parameters=["T2M"], processes=1, output_folder=str(tmp_path), verbose=False)
+    climex.download_nasa_power_data(pts, start_date="20240101", end_date="20240110", **kw)
+    # a shorter period from the same folder: only those days, once each
+    out = climex.download_nasa_power_data(pts, start_date="20240103", end_date="20240105", **kw)
+    assert list(out["date"].dt.day) == [3, 4, 5]
+    assert not out.duplicated(["identifier", "date"]).any()
+
+
+def test_unpublished_days_are_asked_again(tmp_path, monkeypatch):
+    tail = {"properties": {"parameter": {"T2M": {"20240101": 20.0, "20240102": -999.0}}}}
+    calls = []
+    monkeypatch.setattr(cx.requests, "get", lambda url, timeout: calls.append(1) or _Resp(tail))
+    pts = pd.DataFrame({"id": ["a"], "latitude": [21.8], "longitude": [-102.3]})
+    kw = dict(id_col="id", parameters=["T2M"], processes=1, start_date="20240101",
+              end_date="20240102", output_folder=str(tmp_path), verbose=False)
+    climex.download_nasa_power_data(pts, **kw)
+    climex.download_nasa_power_data(pts, **kw)
+    assert len(calls) == 2          # the NaN day makes the point be asked again
