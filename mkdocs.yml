@@ -1,0 +1,58 @@
+site_name: climex
+site_description: "Climate data of Mexico from the NASA POWER API (daily, monthly or climatological temperature, precipitation, humidity, wind and radiation for a set of points)."
+site_url: https://fdzul.github.io/climex-py/
+repo_url: https://github.com/fdzul/climex-py
+repo_name: fdzul/climex-py
+copyright: Felipe Antonio Dzul Manzanilla · MIT license
+
+theme:
+  name: material
+  custom_dir: overrides
+  logo: assets/logo.png
+  favicon: assets/favicon.png
+  language: en
+  palette:
+    - scheme: default
+      primary: teal
+      toggle:
+        icon: material/weather-night
+        name: Dark mode
+    - scheme: slate
+      primary: teal
+      toggle:
+        icon: material/weather-sunny
+        name: Light mode
+  features:
+    - navigation.tabs
+    - navigation.tabs.sticky
+    - navigation.sections
+    - navigation.indexes
+    - navigation.top
+    - content.code.copy
+
+nav:
+  - Home: index.md
+  - Getting Started: getting-started.md
+  - Reference: reference.md
+  - About:
+      - Citation: citation.md
+      - Changelog: changelog.md
+      - License: license.md
+  - Español: es.md
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: [src]
+          options:
+            docstring_style: numpy
+            show_source: false
+            heading_level: 3
+
+markdown_extensions:
+  - admonition
+  - tables
+  - pymdownx.highlight
+  - pymdownx.superfences

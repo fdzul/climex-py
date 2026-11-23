@@ -1,281 +1,214 @@
+"""Download climate data of Mexico from the NASA POWER API.
+
+NASA POWER (https://power.larc.nasa.gov) gives daily, monthly and
+climatological values of temperature, precipitation, humidity, wind and
+radiation for any point, from satellite and reanalysis data (MERRA-2,
+CERES).
 """
-NASA POWER API Function for DataFrame input
-Función simplificada para descargar datos climáticos usando pandas DataFrame
-"""
-import os, sys, time, json, urllib3, requests, multiprocessing
+from __future__ import annotations
+
+import multiprocessing
+import os
+import sys
+import time
+from typing import Sequence
+
 import pandas as pd
-from typing import List
+import requests
 
-urllib3.disable_warnings()
+API = "https://power.larc.nasa.gov/api/temporal"
+TEMPORAL = ("daily", "monthly", "climatology")
+COMMUNITIES = ("RE", "AG", "SB")
+FILL = -999.0          # NASA POWER missing value
 
-def download_function(collection):
-    """Función de descarga para multiprocesamiento - guarda directamente en CSV"""
-    request, filepath, row_info = collection
+
+def build_url(latitude: float, longitude: float, parameters: Sequence[str],
+              temporal_resolution: str = "daily", community: str = "RE",
+              start: str | None = None, end: str | None = None) -> str:
+    """URL of one NASA POWER request for a point.
+
+    Parameters
+    ----------
+    latitude, longitude : float
+        Coordinates of the point (decimal degrees, WGS84).
+    parameters : list of str
+        NASA POWER parameters, e.g. ``["T2M", "PRECTOTCORR"]``.
+    temporal_resolution : {"daily", "monthly", "climatology"}
+    community : {"RE", "AG", "SB"}
+    start, end : str, optional
+        Dates as ``"YYYYMMDD"`` (for ``"monthly"`` only the year is used).
+        Not used for ``"climatology"``.
+    """
+    if temporal_resolution not in TEMPORAL:
+        raise ValueError(f"temporal_resolution must be one of {TEMPORAL}")
+    if community not in COMMUNITIES:
+        raise ValueError(f"community must be one of {COMMUNITIES}")
+    if not parameters:
+        raise ValueError("give at least one parameter")
+    url = (f"{API}/{temporal_resolution}/point?parameters={','.join(parameters)}"
+           f"&community={community}&longitude={longitude}&latitude={latitude}&format=JSON")
+    if temporal_resolution == "daily":
+        url += f"&start={start}&end={end}"
+    elif temporal_resolution == "monthly":
+        url += f"&start={str(start)[:4]}&end={str(end)[:4]}"
+    return url
+
+
+def parse_response(js: dict, temporal_resolution: str = "daily") -> pd.DataFrame:
+    """Table (one row per day, month or period) from the JSON of NASA POWER."""
+    par = js.get("properties", {}).get("parameter")
+    if not par:
+        msg = js.get("messages") or js.get("errors") or js.get("message") or "no data"
+        raise ValueError(f"NASA POWER: {msg}")
+    df = pd.DataFrame(par).replace(FILL, float("nan"))
+    key = df.index.astype(str)
+    df = df.reset_index(drop=True)
+    if temporal_resolution == "daily":
+        df.insert(0, "date", pd.to_datetime(key, format="%Y%m%d"))
+    elif temporal_resolution == "monthly":
+        df.insert(0, "month", key.str[4:].astype(int))
+        df.insert(0, "year", key.str[:4].astype(int))
+        df = df[df["month"] <= 12].reset_index(drop=True)      # 13 = annual value
+    else:
+        df.insert(0, "period", key)
+    return df
+
+
+def _download(job):
+    url, filepath, info, temporal_resolution = job
     try:
-        response = requests.get(url=request, verify=False, timeout=30.00).json()
-        
-        # Convertir respuesta JSON a CSV
-        if 'properties' in response and 'parameter' in response['properties']:
-            climate_params = response['properties']['parameter']
-            
-            # Convertir a DataFrame
-            df_climate = pd.DataFrame(climate_params)
-            
-            if not df_climate.empty:
-                # Agregar metadata
-                df_climate['latitude'] = row_info['latitude']
-                df_climate['longitude'] = row_info['longitude']
-                df_climate['identifier'] = row_info['identifier']
-                
-                # Manejar fechas/períodos
-                if df_climate.index.name is None and len(df_climate.index) > 0:
-                    try:
-                        df_climate['date'] = pd.to_datetime(df_climate.index, format='%Y%m%d')
-                    except:
-                        df_climate['period'] = df_climate.index
-                
-                # Reordenar columnas
-                base_cols = ['identifier', 'latitude', 'longitude']
-                if 'date' in df_climate.columns:
-                    base_cols.append('date')
-                if 'period' in df_climate.columns:
-                    base_cols.append('period')
-                    
-                other_cols = [col for col in df_climate.columns if col not in base_cols]
-                df_climate = df_climate[base_cols + other_cols]
-                
-                # Guardar como CSV
-                df_climate.to_csv(filepath, index=False)
-                
-        return row_info, True, None
-        
-    except Exception as e:
-        return row_info, False, str(e)
+        r = requests.get(url, timeout=60)
+        df = parse_response(r.json(), temporal_resolution)
+        for k in ("longitude", "latitude", "identifier"):
+            df.insert(0, k, info[k])
+        df.to_csv(filepath, index=False)
+        return info, True, None
+    except Exception as e:                       # noqa: BLE001 - reported per point
+        return info, False, str(e)
+
 
 def download_nasa_power_data(df: pd.DataFrame,
-                           lat_col: str = 'latitude',
-                           lon_col: str = 'longitude',
-                           start_date: str = '20150101',
-                           end_date: str = '20150305',
-                           parameters: List[str] = ['T2M', 'T2MDEW', 'T2MWET', 'TS', 'T2M_RANGE', 'T2M_MAX', 'T2M_MIN'],
-                           temporal_resolution: str = 'daily',
-                           spatial_resolution: str = 'point',
-                           community: str = 'RE',
-                           processes: int = 5,
-                           output_folder: str = './nasa_power_data',
-                           start_col: str = None,
-                           end_col: str = None,
-                           id_col: str = None,
-                           return_consolidated: bool = True) -> pd.DataFrame:
-    """
-    Descarga datos climáticos de NASA POWER para ubicaciones en un DataFrame
-    
-    Args:
-        df: DataFrame con datos de ubicaciones
-        lat_col: Nombre de la columna de latitud (default: 'latitude')
-        lon_col: Nombre de la columna de longitud (default: 'longitude')
-        start_date: Fecha de inicio en formato YYYYMMDD (default: '20150101')
-        end_date: Fecha de fin en formato YYYYMMDD (default: '20150305')
-        parameters: Lista de parámetros climáticos a descargar (default: temperatura y derivados)
-        resolution: Resolución temporal ('daily', 'monthly', 'climatology') (default: 'daily')
-        community: Comunidad NASA POWER ('RE', 'AG', 'SB') (default: 'RE')
-        processes: Número de procesos concurrentes (máximo 5) (default: 5)
-        start_col: Nombre de columna con fechas de inicio (opcional)
-        end_col: Nombre de columna con fechas de fin (opcional)
-        id_col: Nombre de columna para identificador único (opcional)
-        output_folder: Carpeta donde guardar archivos JSON (default: './nasa_power_data')
-        return_consolidated: Si retornar datos consolidados o solo resultados de descarga (default: True)
-        
-    Returns:
-        DataFrame con datos climáticos consolidados (si return_consolidated=True) 
-        o DataFrame con resultados de descarga (si return_consolidated=False)
-        
-    Parámetros disponibles:
-        Temperatura: T2M, T2M_MAX, T2M_MIN, T2M_RANGE, T2MDEW, T2MWET, TS
-        Radiación: ALLSKY_SFC_SW_DWN, CLRSKY_SFC_SW_DWN, ALLSKY_SFC_LW_DWN
-        Precipitación: PRECTOTCORR
-        Viento: WS2M, WS10M, WD2M, WD10M
-        Humedad: RH2M, QV2M
-        Presión: PS, SLP
-        
-    Resoluciones temporales disponibles:
-        - 'daily': Datos diarios
-        - 'monthly': Promedios mensuales
-        - 'climatology': Climatología (promedios de largo plazo)
-    
-    Resoluciones espaciales disponibles:
-        - 'point': Datos puntuales (0.5° x 0.625°)
-        - 'regional': Datos regionales (1° x 1°)
-        
-    Comunidades disponibles:
-        - 'RE': Renewable Energy (Energía Renovable)
-        - 'AG': Agroclimatology (Agroclimatología)
-        - 'SB': Sustainable Buildings (Edificios Sustentables)
-    """
-    
-    # Validaciones
-    if lat_col not in df.columns or lon_col not in df.columns:
-        raise ValueError(f"DataFrame debe contener columnas '{lat_col}' y '{lon_col}'")
-    
-    if not parameters:
-        raise ValueError("Debe especificar al menos un parámetro")
-    
-    processes = min(processes, 5)  # NASA recomienda máximo 5 requests concurrentes
-    
-    valid_temporal_resolutions = ['daily', 'monthly', 'climatology']
-    if temporal_resolution not in valid_temporal_resolutions:
-        raise ValueError(f"Resolución temporal debe ser una de: {valid_temporal_resolutions}")
-    
-    valid_spatial_resolutions = ['point', 'regional']
-    if spatial_resolution not in valid_spatial_resolutions:
-        raise ValueError(f"Resolución espacial debe ser una de: {valid_spatial_resolutions}")
-    
-    valid_communities = ['RE', 'AG', 'SB']
-    if community not in valid_communities:
-        raise ValueError(f"Comunidad debe ser una de: {valid_communities}")
-    
-    # Crear directorio de salida
-    os.makedirs(output_folder, exist_ok=True)
-    
-    # Template de URL con parámetros dinámicos
-    params_str = ','.join(parameters)
-    
-    if temporal_resolution == 'climatology':
-        request_template = (
-            "https://power.larc.nasa.gov/api/temporal/climatology/{spatial_resolution}?"
-            "parameters={parameters}&community={community}&"
-            "longitude={{longitude}}&latitude={{latitude}}&format=JSON"
-        ).format(spatial_resolution=spatial_resolution, parameters=params_str, community=community)
-    else:
-        request_template = (
-            "https://power.larc.nasa.gov/api/temporal/{temporal_resolution}/{spatial_resolution}?"
-            "parameters={parameters}&community={community}&"
-            "longitude={{longitude}}&latitude={{latitude}}&"
-            "start={{start_date}}&end={{end_date}}&format=JSON"
-        ).format(temporal_resolution=temporal_resolution, spatial_resolution=spatial_resolution, 
-                parameters=params_str, community=community)
-    
-    start_time = time.time()
-    requests = []
-    
-    print(f"Preparando {len(df)} solicitudes de descarga...")
-    print(f"Parámetros: {', '.join(parameters)}")
-    print(f"Resolución temporal: {temporal_resolution}")
-    print(f"Resolución espacial: {spatial_resolution}")
-    print(f"Comunidad: {community}")
-    print(f"Procesos: {processes}")
-    
-    # Preparar requests para cada fila del DataFrame
-    for idx, row in df.iterrows():
-        latitude = row[lat_col]
-        longitude = row[lon_col]
-        
-        # Manejar columnas de fecha
-        if start_col and start_col in df.columns:
-            start = pd.to_datetime(row[start_col]).strftime('%Y%m%d')
-        else:
-            start = start_date
-            
-        if end_col and end_col in df.columns:
-            end = pd.to_datetime(row[end_col]).strftime('%Y%m%d')
-        else:
-            end = end_date
-        
-        # Crear URL de request
-        if temporal_resolution == 'climatology':
-            request_url = request_template.format(
-                latitude=latitude, 
-                longitude=longitude
-            )
-            date_suffix = "climatology"
-        else:
-            request_url = request_template.format(
-                latitude=latitude, 
-                longitude=longitude,
-                start_date=start,
-                end_date=end
-            )
-            date_suffix = f"{start}_{end}"
-        
-        # Crear nombre de archivo CSV
-        identifier = row[id_col] if id_col and id_col in df.columns else f"idx_{idx}"
-        #filename = f"{identifier}_Lat_{latitude}_Lon_{longitude}_{date_suffix}.csv"
-        filename = f"{identifier}.csv"
-        filepath = os.path.join(output_folder, filename)
-        
-        # Información de la fila para tracking
-        row_info = {
-            'index': idx,
-            'latitude': latitude,
-            'longitude': longitude,
-            'start_date': start if temporal_resolution != 'climatology' else None,
-            'end_date': end if temporal_resolution != 'climatology' else None,
-            'identifier': identifier,
-            'filename': filename
-        }
-        
-        requests.append((request_url, filepath, row_info))
-    
-    # Ejecutar descargas con multiprocesamiento
-    print(f"\nIniciando descargas...")
-    requests_total = len(requests)
-    
-    with multiprocessing.Pool(processes) as pool:
-        results = pool.imap_unordered(download_function, requests)
-        
-        download_results = []
-        for i, (row_info, success, error) in enumerate(results, 1):
-            sys.stderr.write(f'\rDescargando: {i/requests_total:.1%}')
-            
-            result = row_info.copy()
-            result['success'] = success
-            result['error'] = error
-            result['downloaded_at'] = time.strftime('%Y-%m-%d %H:%M:%S')
-            download_results.append(result)
-    
-    # Crear DataFrame de resultados
-    results_df = pd.DataFrame(download_results)
-    
-    total_time = round((time.time() - start_time), 2)
-    
-    print(f"\n\n¡Descarga completada!")
-    print(f"Tiempo total: {total_time} segundos")
-    print(f"Descargas exitosas: {results_df['success'].sum()}/{len(results_df)}")
-    
-    if not results_df['success'].all():
-        failed = results_df[~results_df['success']]
-        print(f"Descargas fallidas: {len(failed)}")
-    
-    # Si se solicita, consolidar datos
-    if return_consolidated and results_df['success'].any():
-        print("\nConsolidando datos...")
-        consolidated_data = _consolidate_csv_data(results_df, output_folder)
-        return consolidated_data
-    else:
-        return results_df
+                             lat_col: str = "latitude",
+                             lon_col: str = "longitude",
+                             start_date: str = "20150101",
+                             end_date: str = "20150305",
+                             parameters: Sequence[str] = ("T2M", "T2MDEW", "T2MWET", "TS",
+                                                          "T2M_RANGE", "T2M_MAX", "T2M_MIN"),
+                             temporal_resolution: str = "daily",
+                             community: str = "RE",
+                             processes: int = 5,
+                             output_folder: str = "./nasa_power_data",
+                             start_col: str | None = None,
+                             end_col: str | None = None,
+                             id_col: str | None = None,
+                             return_consolidated: bool = True,
+                             verbose: bool = True) -> pd.DataFrame:
+    """Download NASA POWER climate data for the points of a table.
 
-def _consolidate_csv_data(results_df: pd.DataFrame, output_folder: str) -> pd.DataFrame:
-    """Función auxiliar para consolidar archivos CSV en un DataFrame"""
-    all_data = []
-    successful_downloads = results_df[results_df['success']]
-    
-    for _, row in successful_downloads.iterrows():
-        filepath = os.path.join(output_folder, row['filename'])
-        
-        try:
-            # Leer archivo CSV
-            df_climate = pd.read_csv(filepath)
-            
-            if not df_climate.empty:
-                all_data.append(df_climate)
-                    
-        except Exception as e:
-            print(f"Error cargando {row['filename']}: {e}")
-    
-    if all_data:
-        consolidated_df = pd.concat(all_data, ignore_index=True)
-        print(f"Datos consolidados: {len(consolidated_df)} registros")
-        return consolidated_df
+    Each point is saved as a CSV in ``output_folder`` (``<identifier>.csv``),
+    so an interrupted download can be checked point by point.
+
+    Parameters
+    ----------
+    df : pandas.DataFrame
+        Points to download, e.g. the centroids of the municipalities or AGEB.
+    lat_col, lon_col : str
+        Columns with the coordinates (decimal degrees, WGS84).
+    start_date, end_date : str
+        Period as ``"YYYYMMDD"``; for ``"monthly"`` only the year is used.
+    parameters : list of str
+        NASA POWER parameters. Temperature: ``T2M``, ``T2M_MAX``, ``T2M_MIN``,
+        ``T2M_RANGE``, ``T2MDEW``, ``T2MWET``, ``TS``; precipitation:
+        ``PRECTOTCORR``; humidity: ``RH2M``, ``QV2M``; wind: ``WS2M``,
+        ``WS10M``; radiation: ``ALLSKY_SFC_SW_DWN``; pressure: ``PS``.
+    temporal_resolution : {"daily", "monthly", "climatology"}
+    community : {"RE", "AG", "SB"}
+        Renewable energy, agroclimatology or sustainable buildings (units).
+    processes : int
+        Simultaneous requests (NASA asks for at most 5); 1 downloads in order.
+    output_folder : str
+        Folder for the CSV of each point.
+    start_col, end_col : str, optional
+        Columns with a different period for each point.
+    id_col : str, optional
+        Column with the identifier of each point (else ``idx_<row>``).
+    return_consolidated : bool
+        If True, return the data of all the points in one table; if False,
+        the result of each download.
+    verbose : bool
+        Show the progress.
+
+    Returns
+    -------
+    pandas.DataFrame
+        Columns ``identifier``, ``latitude``, ``longitude``, the date
+        (``date``; ``year`` and ``month``; or ``period``) and one column per
+        parameter. Missing values (-999 in NASA POWER) are NaN.
+
+    Examples
+    --------
+    >>> import pandas as pd
+    >>> from climex import download_nasa_power_data
+    >>> pts = pd.DataFrame({"id": ["merida"], "latitude": [20.97], "longitude": [-89.62]})
+    >>> clima = download_nasa_power_data(pts, id_col="id", parameters=["T2M", "PRECTOTCORR"],
+    ...                                  start_date="20240101", end_date="20241231")
+    """
+    if lat_col not in df.columns or lon_col not in df.columns:
+        raise ValueError(f"df must have the columns '{lat_col}' and '{lon_col}'")
+    parameters = list(parameters)
+    build_url(0, 0, parameters, temporal_resolution, community, start_date, end_date)  # validate
+    processes = max(1, min(int(processes), 5))
+    os.makedirs(output_folder, exist_ok=True)
+
+    jobs = []
+    for idx, row in df.iterrows():
+        start = pd.to_datetime(row[start_col]).strftime("%Y%m%d") if start_col else start_date
+        end = pd.to_datetime(row[end_col]).strftime("%Y%m%d") if end_col else end_date
+        ident = row[id_col] if id_col else f"idx_{idx}"
+        info = {"index": idx, "identifier": ident, "latitude": row[lat_col],
+                "longitude": row[lon_col], "filename": f"{ident}.csv",
+                "start_date": None if temporal_resolution == "climatology" else start,
+                "end_date": None if temporal_resolution == "climatology" else end}
+        url = build_url(row[lat_col], row[lon_col], parameters, temporal_resolution,
+                        community, start, end)
+        jobs.append((url, os.path.join(output_folder, info["filename"]), info, temporal_resolution))
+
+    if verbose:
+        print(f"{len(jobs)} points; parameters: {', '.join(parameters)}; "
+              f"{temporal_resolution}; community {community}; {processes} processes")
+    t0 = time.time()
+    out = []
+    if processes == 1:
+        it = map(_download, jobs)
+        pool = None
     else:
-        print("No se pudieron consolidar datos")
-        return pd.DataFrame()
+        pool = multiprocessing.Pool(processes)
+        it = pool.imap_unordered(_download, jobs)
+    try:
+        for i, (info, ok, err) in enumerate(it, 1):
+            if verbose:
+                sys.stderr.write(f"\rDownloading: {i / len(jobs):.0%}")
+            out.append({**info, "success": ok, "error": err,
+                        "downloaded_at": time.strftime("%Y-%m-%d %H:%M:%S")})
+    finally:
+        if pool is not None:
+            pool.close()
+            pool.join()
+    res = pd.DataFrame(out)
+    if verbose:
+        sys.stderr.write("\n")
+        print(f"{int(res['success'].sum())}/{len(res)} points downloaded "
+              f"in {time.time() - t0:.1f} s")
+    if return_consolidated and res["success"].any():
+        return _consolidate(res, output_folder)
+    return res
+
+
+def _consolidate(res: pd.DataFrame, output_folder: str) -> pd.DataFrame:
+    parts = []
+    for _, r in res[res["success"]].iterrows():
+        d = pd.read_csv(os.path.join(output_folder, r["filename"]))
+        if "date" in d.columns:
+            d["date"] = pd.to_datetime(d["date"])
+        parts.append(d)
+    return pd.concat(parts, ignore_index=True) if parts else pd.DataFrame()
